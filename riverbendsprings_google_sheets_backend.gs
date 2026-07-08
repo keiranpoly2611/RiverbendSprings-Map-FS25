@@ -1,5 +1,5 @@
 /**
- * Zielonka FS25 Interactive Map - Google Sheets Cloud Sync Backend
+ * Riverbend Springs FS25 Interactive Map - Google Sheets Cloud Sync Backend
  *
  * This is a separate deployment from the Kinlaig map's backend - each map needs its
  * own Google Sheet + Apps Script deployment (and its own URL/access code), since this
