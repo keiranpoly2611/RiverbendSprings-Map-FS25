@@ -276,27 +276,27 @@
 
     <div class="tabPanel" data-panel="cloud">
       <div class="card">
-        <b>Create a new room</b>
-        <p class="hint">Want to share this map with your own friends instead of Keiran's group? Create a room here once, then share the room code + edit code with them - everyone enters both below to sync together.</p>
-        <label for="newRoomCode">Room code</label>
+        <b>Create a new map</b>
+        <p class="hint">Want to share this map with your own friends instead of Keiran's group? Create a map here once, then share the map code + edit code with them - everyone enters both below to sync together.</p>
+        <label for="newRoomCode">Map code</label>
         <input id="newRoomCode" placeholder="e.g. MYFARM123" />
         <div class="row" style="margin:6px 0 10px">
-          <button type="button" id="generateRoomBtn">Generate a random room code</button>
+          <button type="button" id="generateRoomBtn">Generate a random map code</button>
         </div>
-        <label for="newRoomEditCode">Edit code <span style="font-weight:400">(the password for your room)</span></label>
+        <label for="newRoomEditCode">Edit code <span style="font-weight:400">(the password for your map)</span></label>
         <input id="newRoomEditCode" placeholder="Choose a password for your group" />
         <label for="newRoomCreatorName">Your name</label>
         <input id="newRoomCreatorName" placeholder="Shown to others as who last updated the map" />
         <div class="row" style="margin-top:10px">
-          <button class="primary" id="createRoomBtn" type="button">Create room</button>
+          <button class="primary" id="createRoomBtn" type="button">Create map</button>
         </div>
-        <div id="createRoomStatus" class="cloudStatus">Create a room to share this map with your own friends.</div>
+        <div id="createRoomStatus" class="cloudStatus">Create a map to share this map with your own friends.</div>
       </div>
       <div class="card">
         <b>Cloud sync / multiplayer beta</b>
-        <p class="hint">Leave Room code blank to sync with this map's default shared group. To sync with your own room instead, enter the room code + edit code from above.</p>
-        <label for="cloudRoomCode">Room code <span style="font-weight:400">(optional - blank uses the default room)</span></label>
-        <input id="cloudRoomCode" placeholder="Blank = default room, or your own room code" />
+        <p class="hint">Leave Map code blank to sync with this map's default shared group. To sync with your own map instead, enter the map code + edit code from above.</p>
+        <label for="cloudRoomCode">Map code</label>
+        <input id="cloudRoomCode" placeholder="Blank = default map, or your own map code" />
         <label for="cloudToken">Shared edit code</label>
         <input id="cloudToken" placeholder="Same edit code as everyone else in your group" />
         <label for="cloudUserName">Your name</label>
@@ -620,9 +620,9 @@ async function createRoom() {
   const room = (document.getElementById('newRoomCode')?.value || '').trim();
   const code = (document.getElementById('newRoomEditCode')?.value || '').trim();
   const name = (document.getElementById('newRoomCreatorName')?.value || '').trim();
-  if (!room) { setCreateRoomStatus('Enter or generate a room code first.', 'warn'); return; }
-  if (!code) { setCreateRoomStatus('Choose an edit code (password) for this room.', 'warn'); return; }
-  setCreateRoomStatus('Creating room…');
+  if (!room) { setCreateRoomStatus('Enter or generate a map code first.', 'warn'); return; }
+  if (!code) { setCreateRoomStatus('Choose an edit code (password) for this map.', 'warn'); return; }
+  setCreateRoomStatus('Creating map…');
   try {
     await supabaseRpc('fs25_create_room', { p_map_id: CLOUD_MAP_ID, p_room_code: room, p_code: code, p_created_by: name });
     const roomEl = document.getElementById('cloudRoomCode');
@@ -632,9 +632,9 @@ async function createRoom() {
     if (tokenEl) tokenEl.value = code;
     if (name && nameEl) nameEl.value = name;
     saveCloudSettings();
-    setCreateRoomStatus(`Room "${room}" created! Share the room code and edit code with your friends - they enter both into Cloud sync below to join.`, 'ok');
+    setCreateRoomStatus(`Map "${room}" created! Share the map code and edit code with your friends - they enter both into Cloud sync below to join.`, 'ok');
   } catch (err) {
-    setCreateRoomStatus('Could not create room: ' + err.message, 'bad');
+    setCreateRoomStatus('Could not create map: ' + err.message, 'bad');
   }
 }
 function scheduleCloudAutoSave() {
@@ -662,7 +662,7 @@ async function cloudLoad() {
   const token = getCloudToken();
   const room = getCloudRoomCode();
   if (!token) { setCloudStatus('Enter the shared edit code first.', 'warn'); return; }
-  setCloudStatus(room ? `Loading room ${room}…` : 'Loading from cloud…');
+  setCloudStatus(room ? `Loading map ${room}…` : 'Loading from cloud…');
   try {
     const row = await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token, p_room_code: room });
     if (!row || !row.data) { setCloudStatus('Cloud is connected, but there is no saved map data yet. Upload your current map first.', 'warn'); return; }
@@ -701,7 +701,7 @@ async function cloudSave(silent=false) {
 async function doCloudSave(silent=false) {
   const token = getCloudToken();
   const room = getCloudRoomCode();
-  if (!silent) setCloudStatus(room ? `Uploading to room ${room}…` : 'Uploading current map to cloud…');
+  if (!silent) setCloudStatus(room ? `Uploading to map ${room}…` : 'Uploading current map to cloud…');
   try {
     const row = await supabaseRpc('fs25_save_map', {
       p_map_id: CLOUD_MAP_ID,
