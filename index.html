@@ -276,8 +276,27 @@
 
     <div class="tabPanel" data-panel="cloud">
       <div class="card">
+        <b>Create a new room</b>
+        <p class="hint">Want to share this map with your own friends instead of Keiran's group? Create a room here once, then share the room code + edit code with them - everyone enters both below to sync together.</p>
+        <label for="newRoomCode">Room code</label>
+        <input id="newRoomCode" placeholder="e.g. MYFARM123" />
+        <div class="row" style="margin:6px 0 10px">
+          <button type="button" id="generateRoomBtn">Generate a random room code</button>
+        </div>
+        <label for="newRoomEditCode">Edit code <span style="font-weight:400">(the password for your room)</span></label>
+        <input id="newRoomEditCode" placeholder="Choose a password for your group" />
+        <label for="newRoomCreatorName">Your name</label>
+        <input id="newRoomCreatorName" placeholder="Shown to others as who last updated the map" />
+        <div class="row" style="margin-top:10px">
+          <button class="primary" id="createRoomBtn" type="button">Create room</button>
+        </div>
+        <div id="createRoomStatus" class="cloudStatus">Create a room to share this map with your own friends.</div>
+      </div>
+      <div class="card">
         <b>Cloud sync / multiplayer beta</b>
-        <p class="hint">This map already knows where to connect. Everyone just enters the same shared edit code, then loads/uploads the shared farm data.</p>
+        <p class="hint">Leave Room code blank to sync with this map's default shared group. To sync with your own room instead, enter the room code + edit code from above.</p>
+        <label for="cloudRoomCode">Room code <span style="font-weight:400">(optional - blank uses the default room)</span></label>
+        <input id="cloudRoomCode" placeholder="Blank = default room, or your own room code" />
         <label for="cloudToken">Shared edit code</label>
         <input id="cloudToken" placeholder="Same edit code as everyone else in your group" />
         <label for="cloudUserName">Your name</label>
@@ -515,6 +534,7 @@ let mapMode = localStorage.getItem('riverbendsprings_fs25_map_mode_v1') || 'owne
 
 let plans = JSON.parse(localStorage.getItem('riverbendsprings_fs25_clean_plans_v1') || '{}');
 let owners = JSON.parse(localStorage.getItem('riverbendsprings_fs25_owners_v1') || '{}');
+let cloudRoomCode = localStorage.getItem('riverbendsprings_fs25_cloud_room_v1') || '';
 let cloudToken = localStorage.getItem('riverbendsprings_fs25_cloud_token_v1') || '';
 let cloudUserName = localStorage.getItem('riverbendsprings_fs25_cloud_user_v1') || '';
 let autoCloud = localStorage.getItem('riverbendsprings_fs25_cloud_auto_v1') === 'true';
@@ -562,6 +582,9 @@ function setCloudStatus(message, tone='') {
   el.className = 'cloudStatus' + (tone ? ' ' + tone : '');
   el.textContent = message;
 }
+function getCloudRoomCode() {
+  return (document.getElementById('cloudRoomCode')?.value || cloudRoomCode || '').trim();
+}
 function getCloudToken() {
   return (document.getElementById('cloudToken')?.value || cloudToken || '').trim();
 }
@@ -569,13 +592,47 @@ function getCloudUserName() {
   return (document.getElementById('cloudUserName')?.value || cloudUserName || '').trim();
 }
 function saveCloudSettings() {
+  cloudRoomCode = getCloudRoomCode();
   cloudToken = getCloudToken();
   cloudUserName = getCloudUserName();
   autoCloud = !!document.getElementById('autoCloudToggle')?.checked;
+  localStorage.setItem('riverbendsprings_fs25_cloud_room_v1', cloudRoomCode);
   localStorage.setItem('riverbendsprings_fs25_cloud_token_v1', cloudToken);
   localStorage.setItem('riverbendsprings_fs25_cloud_user_v1', cloudUserName);
   localStorage.setItem('riverbendsprings_fs25_cloud_auto_v1', String(autoCloud));
   setCloudStatus(cloudToken ? 'Cloud setup saved on this device. Use Load from cloud or Upload current map.' : 'Shared edit code is empty. Local saving still works.', cloudToken ? 'ok' : 'warn');
+}
+function setCreateRoomStatus(message, tone='') {
+  const el = document.getElementById('createRoomStatus');
+  if (!el) return;
+  el.className = 'cloudStatus' + (tone ? ' ' + tone : '');
+  el.textContent = message;
+}
+function generateRoomCode() {
+  const code = Math.random().toString(36).slice(2, 10).toUpperCase();
+  const el = document.getElementById('newRoomCode');
+  if (el) el.value = code;
+}
+async function createRoom() {
+  const room = (document.getElementById('newRoomCode')?.value || '').trim();
+  const code = (document.getElementById('newRoomEditCode')?.value || '').trim();
+  const name = (document.getElementById('newRoomCreatorName')?.value || '').trim();
+  if (!room) { setCreateRoomStatus('Enter or generate a room code first.', 'warn'); return; }
+  if (!code) { setCreateRoomStatus('Choose an edit code (password) for this room.', 'warn'); return; }
+  setCreateRoomStatus('Creating room…');
+  try {
+    await supabaseRpc('fs25_create_room', { p_map_id: CLOUD_MAP_ID, p_room_code: room, p_code: code, p_created_by: name });
+    const roomEl = document.getElementById('cloudRoomCode');
+    const tokenEl = document.getElementById('cloudToken');
+    const nameEl = document.getElementById('cloudUserName');
+    if (roomEl) roomEl.value = room;
+    if (tokenEl) tokenEl.value = code;
+    if (name && nameEl) nameEl.value = name;
+    saveCloudSettings();
+    setCreateRoomStatus(`Room "${room}" created! Share the room code and edit code with your friends - they enter both into Cloud sync below to join.`, 'ok');
+  } catch (err) {
+    setCreateRoomStatus('Could not create room: ' + err.message, 'bad');
+  }
 }
 function scheduleCloudAutoSave() {
   if (!autoCloud || suppressCloudAuto || !getCloudToken()) return;
@@ -600,10 +657,11 @@ async function supabaseRpc(fn, body) {
 async function cloudLoad() {
   saveCloudSettings();
   const token = getCloudToken();
+  const room = getCloudRoomCode();
   if (!token) { setCloudStatus('Enter the shared edit code first.', 'warn'); return; }
-  setCloudStatus('Loading from cloud…');
+  setCloudStatus(room ? `Loading room ${room}…` : 'Loading from cloud…');
   try {
-    const row = await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token });
+    const row = await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token, p_room_code: room });
     if (!row || !row.data) { setCloudStatus('Cloud is connected, but there is no saved map data yet. Upload your current map first.', 'warn'); return; }
     applyBackupObject(row.data);
     lastCloudSeen = { updatedAt: row.updated_at || null, updatedBy: row.updated_by || '' };
@@ -617,7 +675,7 @@ async function cloudPeek() {
   const token = getCloudToken();
   if (!token) return null;
   try {
-    return await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token });
+    return await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token, p_room_code: getCloudRoomCode() });
   } catch (e) {
     return null;
   }
@@ -639,13 +697,15 @@ async function cloudSave(silent=false) {
 }
 async function doCloudSave(silent=false) {
   const token = getCloudToken();
-  if (!silent) setCloudStatus('Uploading current map to cloud…');
+  const room = getCloudRoomCode();
+  if (!silent) setCloudStatus(room ? `Uploading to room ${room}…` : 'Uploading current map to cloud…');
   try {
     const row = await supabaseRpc('fs25_save_map', {
       p_map_id: CLOUD_MAP_ID,
       p_code: token,
       p_data: backupObject(),
-      p_updated_by: getCloudUserName()
+      p_updated_by: getCloudUserName(),
+      p_room_code: room
     });
     if (row && row.saved_at) lastCloudSeen = { updatedAt: row.saved_at, updatedBy: getCloudUserName() };
     setCloudStatus('Uploaded and confirmed by the cloud. Other players should press Load from cloud to see it.', 'ok');
@@ -654,15 +714,19 @@ async function doCloudSave(silent=false) {
   }
 }
 function initCloudUI() {
+  const roomEl = document.getElementById('cloudRoomCode');
   const tokenEl = document.getElementById('cloudToken');
   const nameEl = document.getElementById('cloudUserName');
   const autoEl = document.getElementById('autoCloudToggle');
+  if (roomEl) roomEl.value = cloudRoomCode;
   if (tokenEl) tokenEl.value = cloudToken;
   if (nameEl) nameEl.value = cloudUserName;
   if (autoEl) autoEl.checked = autoCloud;
   document.getElementById('saveCloudSettings').onclick = saveCloudSettings;
   document.getElementById('loadCloudBtn').onclick = cloudLoad;
   document.getElementById('saveCloudBtn').onclick = () => cloudSave(false);
+  document.getElementById('generateRoomBtn').onclick = generateRoomCode;
+  document.getElementById('createRoomBtn').onclick = createRoom;
   if (autoEl) autoEl.onchange = saveCloudSettings;
   setCloudStatus(cloudToken ? 'Cloud setup found on this device. Load from cloud before editing, then upload when done.' : 'Cloud is not set up yet. Enter the shared edit code above.', cloudToken ? 'ok' : '');
 }
