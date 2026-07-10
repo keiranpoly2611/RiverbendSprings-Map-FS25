@@ -583,13 +583,16 @@ function setCloudStatus(message, tone='') {
   el.textContent = message;
 }
 function getCloudRoomCode() {
-  return (document.getElementById('cloudRoomCode')?.value || cloudRoomCode || '').trim();
+  const el = document.getElementById('cloudRoomCode');
+  return ((el ? el.value : cloudRoomCode) || '').trim();
 }
 function getCloudToken() {
-  return (document.getElementById('cloudToken')?.value || cloudToken || '').trim();
+  const el = document.getElementById('cloudToken');
+  return ((el ? el.value : cloudToken) || '').trim();
 }
 function getCloudUserName() {
-  return (document.getElementById('cloudUserName')?.value || cloudUserName || '').trim();
+  const el = document.getElementById('cloudUserName');
+  return ((el ? el.value : cloudUserName) || '').trim();
 }
 function saveCloudSettings() {
   cloudRoomCode = getCloudRoomCode();
