@@ -530,11 +530,29 @@ const SUPABASE_URL = 'https://aicyvaqkzqlijffqihzd.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_CwwYHTsXQPiQ-vJlO1_Onw_lo5WaAzE';
 const CLOUD_MAP_ID = 'riverbendsprings';
 
-let mapMode = localStorage.getItem('riverbendsprings_fs25_map_mode_v1') || 'owner';
-
-let plans = JSON.parse(localStorage.getItem('riverbendsprings_fs25_clean_plans_v1') || '{}');
-let owners = JSON.parse(localStorage.getItem('riverbendsprings_fs25_owners_v1') || '{}');
+// Local save data is namespaced per map code, so creating or switching to a
+// different shared map never overwrites another map's local save on this
+// device - each map code gets its own independent slot.
 let cloudRoomCode = localStorage.getItem('riverbendsprings_fs25_cloud_room_v1') || '';
+function localSaveKey(base, room = cloudRoomCode) {
+  return base + '::' + (room || 'default');
+}
+(function migrateLegacyLocalSave() {
+  // Older versions kept one flat local save regardless of which map was
+  // active. Copy it into the currently-active map's own namespaced slot once,
+  // so existing saves aren't lost when this update lands.
+  ['riverbendsprings_fs25_clean_plans_v1', 'riverbendsprings_fs25_owners_v1', 'riverbendsprings_fs25_map_mode_v1'].forEach(flatKey => {
+    const namespacedKey = localSaveKey(flatKey);
+    if (localStorage.getItem(flatKey) !== null && localStorage.getItem(namespacedKey) === null) {
+      localStorage.setItem(namespacedKey, localStorage.getItem(flatKey));
+    }
+  });
+})();
+
+let mapMode = localStorage.getItem(localSaveKey('riverbendsprings_fs25_map_mode_v1')) || 'owner';
+
+let plans = JSON.parse(localStorage.getItem(localSaveKey('riverbendsprings_fs25_clean_plans_v1')) || '{}');
+let owners = JSON.parse(localStorage.getItem(localSaveKey('riverbendsprings_fs25_owners_v1')) || '{}');
 let cloudToken = localStorage.getItem('riverbendsprings_fs25_cloud_token_v1') || '';
 let cloudUserName = localStorage.getItem('riverbendsprings_fs25_cloud_user_v1') || '';
 let autoCloud = localStorage.getItem('riverbendsprings_fs25_cloud_auto_v1') === 'true';
@@ -570,9 +588,17 @@ function applyBackupObject(imported) {
     plans = imported || {};
   }
   suppressCloudAuto = true;
-  localStorage.setItem('riverbendsprings_fs25_clean_plans_v1', JSON.stringify(plans));
-  localStorage.setItem('riverbendsprings_fs25_owners_v1', JSON.stringify(owners));
-  localStorage.setItem('riverbendsprings_fs25_map_mode_v1', mapMode);
+  localStorage.setItem(localSaveKey('riverbendsprings_fs25_clean_plans_v1'), JSON.stringify(plans));
+  localStorage.setItem(localSaveKey('riverbendsprings_fs25_owners_v1'), JSON.stringify(owners));
+  localStorage.setItem(localSaveKey('riverbendsprings_fs25_map_mode_v1'), mapMode);
+  updateModeButtons(); renderModeLegend(); renderOwners(); renderList(); renderSelected(); updateStats(); paintMarkers();
+  suppressCloudAuto = false;
+}
+function switchToActiveMapLocalSave() {
+  suppressCloudAuto = true;
+  plans = JSON.parse(localStorage.getItem(localSaveKey('riverbendsprings_fs25_clean_plans_v1')) || '{}');
+  owners = JSON.parse(localStorage.getItem(localSaveKey('riverbendsprings_fs25_owners_v1')) || '{}');
+  mapMode = localStorage.getItem(localSaveKey('riverbendsprings_fs25_map_mode_v1')) || 'owner';
   updateModeButtons(); renderModeLegend(); renderOwners(); renderList(); renderSelected(); updateStats(); paintMarkers();
   suppressCloudAuto = false;
 }
@@ -632,6 +658,7 @@ async function createRoom() {
     if (tokenEl) tokenEl.value = code;
     if (name && nameEl) nameEl.value = name;
     saveCloudSettings();
+    switchToActiveMapLocalSave();
     setCreateRoomStatus(`Map "${room}" created! Share the map code and edit code with your friends - they enter both into Cloud sync below to join.`, 'ok');
   } catch (err) {
     setCreateRoomStatus('Could not create map: ' + err.message, 'bad');
@@ -662,6 +689,7 @@ async function cloudLoad() {
   const token = getCloudToken();
   const room = getCloudRoomCode();
   if (!token) { setCloudStatus('Enter the shared edit code first.', 'warn'); return; }
+  switchToActiveMapLocalSave();
   setCloudStatus(room ? `Loading map ${room}…` : 'Loading from cloud…');
   try {
     const row = await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token, p_room_code: room });
@@ -734,13 +762,13 @@ function initCloudUI() {
   setCloudStatus(cloudToken ? 'Cloud setup found on this device. Load from cloud before editing, then upload when done.' : 'Cloud is not set up yet. Enter the shared edit code above.', cloudToken ? 'ok' : '');
 }
 function savePlans() {
-  localStorage.setItem('riverbendsprings_fs25_clean_plans_v1', JSON.stringify(plans));
+  localStorage.setItem(localSaveKey('riverbendsprings_fs25_clean_plans_v1'), JSON.stringify(plans));
   updateStats();
   paintMarkers();
   scheduleCloudAutoSave();
 }
 function saveOwners() {
-  localStorage.setItem('riverbendsprings_fs25_owners_v1', JSON.stringify(owners));
+  localStorage.setItem(localSaveKey('riverbendsprings_fs25_owners_v1'), JSON.stringify(owners));
   renderOwners();
   renderSelected();
   renderList();
@@ -901,7 +929,7 @@ function renderModeLegend() {
 }
 function setMapMode(mode) {
   mapMode = mode;
-  localStorage.setItem('riverbendsprings_fs25_map_mode_v1', mapMode);
+  localStorage.setItem(localSaveKey('riverbendsprings_fs25_map_mode_v1'), mapMode);
   updateModeButtons();
   renderModeLegend();
   paintMarkers();
@@ -1129,7 +1157,7 @@ function renderOwners() {
       if (!confirm(`Delete ${owners[id].name}?${uses ? ' This will remove the owner from ' + uses + ' field/area assignment(s).' : ''}`)) return;
       delete owners[id];
       Object.keys(plans).forEach(planId => { if (plans[planId].owner === id) plans[planId].owner = ''; if (!hasPlan(planId)) delete plans[planId]; });
-      localStorage.setItem('riverbendsprings_fs25_clean_plans_v1', JSON.stringify(plans));
+      localStorage.setItem(localSaveKey('riverbendsprings_fs25_clean_plans_v1'), JSON.stringify(plans));
       if (selectedOwnerFilter === id) backToOwnersList();
       saveOwners(); updateStats();
     };
