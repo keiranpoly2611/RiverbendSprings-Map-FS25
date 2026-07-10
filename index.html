@@ -277,11 +277,9 @@
     <div class="tabPanel" data-panel="cloud">
       <div class="card">
         <b>Cloud sync / multiplayer beta</b>
-        <p class="hint">Connect this map to a Google Sheets Apps Script web app. Everyone uses the same URL and edit code, then loads/uploads the shared farm data.</p>
-        <label for="cloudUrl">Apps Script Web App URL</label>
-        <input id="cloudUrl" placeholder="Paste the /exec web app URL here" />
+        <p class="hint">This map already knows where to connect. Everyone just enters the same shared edit code, then loads/uploads the shared farm data.</p>
         <label for="cloudToken">Shared edit code</label>
-        <input id="cloudToken" placeholder="Same code you put in the Apps Script" />
+        <input id="cloudToken" placeholder="Same edit code as everyone else in your group" />
         <label for="cloudUserName">Your name</label>
         <input id="cloudUserName" placeholder="Shown to others as who last updated the map" />
         <div class="row" style="margin-top:10px">
@@ -506,11 +504,17 @@ function renderPFHeadroomTable() {
   el.innerHTML = `<div class="refTable-wrap"><table class="refTable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
 
+// Shared Supabase backend - same project/keys used by every FS25 map, only
+// CLOUD_MAP_ID differs per map. Friends never see or enter these; they only
+// need the shared edit code.
+const SUPABASE_URL = 'https://aicyvaqkzqlijffqihzd.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_CwwYHTsXQPiQ-vJlO1_Onw_lo5WaAzE';
+const CLOUD_MAP_ID = 'riverbendsprings';
+
 let mapMode = localStorage.getItem('riverbendsprings_fs25_map_mode_v1') || 'owner';
 
 let plans = JSON.parse(localStorage.getItem('riverbendsprings_fs25_clean_plans_v1') || '{}');
 let owners = JSON.parse(localStorage.getItem('riverbendsprings_fs25_owners_v1') || '{}');
-let cloudUrl = localStorage.getItem('riverbendsprings_fs25_cloud_url_v1') || '';
 let cloudToken = localStorage.getItem('riverbendsprings_fs25_cloud_token_v1') || '';
 let cloudUserName = localStorage.getItem('riverbendsprings_fs25_cloud_user_v1') || '';
 let autoCloud = localStorage.getItem('riverbendsprings_fs25_cloud_auto_v1') === 'true';
@@ -558,9 +562,6 @@ function setCloudStatus(message, tone='') {
   el.className = 'cloudStatus' + (tone ? ' ' + tone : '');
   el.textContent = message;
 }
-function getCloudUrl() {
-  return (document.getElementById('cloudUrl')?.value || cloudUrl || '').trim();
-}
 function getCloudToken() {
   return (document.getElementById('cloudToken')?.value || cloudToken || '').trim();
 }
@@ -568,125 +569,94 @@ function getCloudUserName() {
   return (document.getElementById('cloudUserName')?.value || cloudUserName || '').trim();
 }
 function saveCloudSettings() {
-  cloudUrl = getCloudUrl();
   cloudToken = getCloudToken();
   cloudUserName = getCloudUserName();
   autoCloud = !!document.getElementById('autoCloudToggle')?.checked;
-  localStorage.setItem('riverbendsprings_fs25_cloud_url_v1', cloudUrl);
   localStorage.setItem('riverbendsprings_fs25_cloud_token_v1', cloudToken);
   localStorage.setItem('riverbendsprings_fs25_cloud_user_v1', cloudUserName);
   localStorage.setItem('riverbendsprings_fs25_cloud_auto_v1', String(autoCloud));
-  setCloudStatus(cloudUrl ? 'Cloud setup saved on this device. Use Load from cloud or Upload current map.' : 'Cloud URL is empty. Local saving still works.', cloudUrl ? 'ok' : 'warn');
+  setCloudStatus(cloudToken ? 'Cloud setup saved on this device. Use Load from cloud or Upload current map.' : 'Shared edit code is empty. Local saving still works.', cloudToken ? 'ok' : 'warn');
 }
 function scheduleCloudAutoSave() {
-  if (!autoCloud || suppressCloudAuto || !getCloudUrl()) return;
+  if (!autoCloud || suppressCloudAuto || !getCloudToken()) return;
   clearTimeout(cloudAutoTimer);
   cloudAutoTimer = setTimeout(() => cloudSave(true), 1200);
 }
-function cloudLoad() {
+async function supabaseRpc(fn, body) {
+  const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
+    },
+    body: JSON.stringify(body)
+  });
+  let json = null;
+  try { json = await res.json(); } catch (e) { /* empty body is fine */ }
+  if (!res.ok) throw new Error((json && json.message) || 'Cloud request failed');
+  return Array.isArray(json) ? json[0] : json;
+}
+async function cloudLoad() {
   saveCloudSettings();
-  const url = getCloudUrl();
-  if (!url) { setCloudStatus('Paste your Apps Script Web App URL first.', 'warn'); return; }
-  const cb = 'riverbendspringsCloudCallback_' + Math.random().toString(36).slice(2);
-  const script = document.createElement('script');
-  const sep = url.includes('?') ? '&' : '?';
-  const timeout = setTimeout(() => {
-    cleanup();
-    setCloudStatus('Cloud load timed out. Check the URL, deployment permissions, and edit code.', 'bad');
-  }, 15000);
-  function cleanup() { clearTimeout(timeout); try { delete window[cb]; } catch(e) { window[cb] = undefined; } script.remove(); }
-  window[cb] = (response) => {
-    cleanup();
-    try {
-      if (!response || response.ok === false) throw new Error(response?.error || 'Cloud returned an error');
-      if (!response.data) { setCloudStatus('Cloud is connected, but there is no saved map data yet. Upload your current map first.', 'warn'); return; }
-      applyBackupObject(response.data);
-      lastCloudSeen = { updatedAt: response.updatedAt || null, updatedBy: response.updatedBy || '' };
-      const who = response.updatedBy ? ` Last updated by ${response.updatedBy}${response.updatedAt ? ' at ' + new Date(response.updatedAt).toLocaleString() : ''}.` : '';
-      setCloudStatus('Loaded shared cloud data. Local map is now updated.' + who, 'ok');
-    } catch (err) {
-      setCloudStatus('Cloud load failed: ' + err.message, 'bad');
-    }
-  };
-  script.onerror = () => { cleanup(); setCloudStatus('Cloud load failed. Check the Web App URL and sharing settings.', 'bad'); };
-  script.src = url + sep + 'mode=load&callback=' + encodeURIComponent(cb) + '&token=' + encodeURIComponent(getCloudToken()) + '&_=' + Date.now();
+  const token = getCloudToken();
+  if (!token) { setCloudStatus('Enter the shared edit code first.', 'warn'); return; }
   setCloudStatus('Loading from cloud…');
-  document.body.appendChild(script);
+  try {
+    const row = await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token });
+    if (!row || !row.data) { setCloudStatus('Cloud is connected, but there is no saved map data yet. Upload your current map first.', 'warn'); return; }
+    applyBackupObject(row.data);
+    lastCloudSeen = { updatedAt: row.updated_at || null, updatedBy: row.updated_by || '' };
+    const who = row.updated_by ? ` Last updated by ${row.updated_by}${row.updated_at ? ' at ' + new Date(row.updated_at).toLocaleString() : ''}.` : '';
+    setCloudStatus('Loaded shared cloud data. Local map is now updated.' + who, 'ok');
+  } catch (err) {
+    setCloudStatus('Cloud load failed: ' + err.message, 'bad');
+  }
 }
-function cloudPeek(onDone) {
-  const url = getCloudUrl();
-  if (!url) { onDone(null); return; }
-  const cb = 'riverbendspringsCloudPeek_' + Math.random().toString(36).slice(2);
-  const script = document.createElement('script');
-  const sep = url.includes('?') ? '&' : '?';
-  const timeout = setTimeout(() => { cleanup(); onDone(null); }, 8000);
-  function cleanup() { clearTimeout(timeout); try { delete window[cb]; } catch(e) { window[cb] = undefined; } script.remove(); }
-  window[cb] = (response) => { cleanup(); onDone(response && response.ok !== false ? response : null); };
-  script.onerror = () => { cleanup(); onDone(null); };
-  script.src = url + sep + 'mode=load&callback=' + encodeURIComponent(cb) + '&token=' + encodeURIComponent(getCloudToken()) + '&_=' + Date.now();
-  document.body.appendChild(script);
+async function cloudPeek() {
+  const token = getCloudToken();
+  if (!token) return null;
+  try {
+    return await supabaseRpc('fs25_load_map', { p_map_id: CLOUD_MAP_ID, p_code: token });
+  } catch (e) {
+    return null;
+  }
 }
-function cloudSave(silent=false) {
+async function cloudSave(silent=false) {
   saveCloudSettings();
-  const url = getCloudUrl();
-  if (!url) { if (!silent) setCloudStatus('Paste your Apps Script Web App URL first.', 'warn'); return; }
-  if (silent || !lastCloudSeen) { doCloudSave(silent); return; }
-  cloudPeek(response => {
-    if (response && response.updatedAt && response.updatedAt !== lastCloudSeen.updatedAt) {
-      const who = response.updatedBy || 'someone';
-      const when = new Date(response.updatedAt).toLocaleString();
+  const token = getCloudToken();
+  if (!token) { if (!silent) setCloudStatus('Enter the shared edit code first.', 'warn'); return; }
+  if (!silent && lastCloudSeen) {
+    const row = await cloudPeek();
+    if (row && row.updated_at && row.updated_at !== lastCloudSeen.updatedAt) {
+      const who = row.updated_by || 'someone';
+      const when = new Date(row.updated_at).toLocaleString();
       const proceed = confirm(`Cloud was updated by ${who} at ${when}, after you last loaded. Uploading now will overwrite their changes.\n\nUpload anyway?`);
       if (!proceed) { setCloudStatus('Upload cancelled. Press "Load from cloud" to see the latest changes first.', 'warn'); return; }
     }
-    doCloudSave(silent);
-  });
-}
-function doCloudSave(silent=false) {
-  const url = getCloudUrl();
-  const payload = new URLSearchParams();
-  payload.set('mode', 'save');
-  payload.set('token', getCloudToken());
-  payload.set('user', getCloudUserName());
-  payload.set('data', JSON.stringify(backupObject()));
-  if (!silent) setCloudStatus('Uploading current map to cloud…');
-  fetch(url, { method: 'POST', body: payload })
-    .then(res => res.text())
-    .then(text => {
-      let response;
-      try { response = JSON.parse(text); }
-      catch (e) { throw new Error('Cloud returned an unexpected response'); }
-      if (!response || response.ok === false) throw new Error(response?.error || 'Cloud rejected the upload');
-      if (response.savedAt) lastCloudSeen = { updatedAt: response.savedAt, updatedBy: getCloudUserName() };
-      setCloudStatus('Uploaded and confirmed by the cloud. Other players should press Load from cloud to see it.', 'ok');
-    })
-    .catch(() => {
-      // Some browsers/deployments block reading the response even though the
-      // upload itself goes through (a CORS restriction, not an upload failure).
-      // Fall back to the old blind post so the upload still happens, but say so honestly.
-      cloudSaveFallback_(payload);
-    });
-}
-function cloudSaveFallback_(payload) {
-  const url = getCloudUrl();
-  const iframeName = 'riverbendspringsCloudFrame_' + Math.random().toString(36).slice(2);
-  const iframe = document.createElement('iframe');
-  iframe.name = iframeName; iframe.style.display = 'none';
-  const form = document.createElement('form');
-  form.method = 'POST'; form.action = url; form.target = iframeName; form.style.display = 'none';
-  for (const [k, v] of payload.entries()) {
-    const input = document.createElement('input'); input.type='hidden'; input.name=k; input.value=v; form.appendChild(input);
   }
-  document.body.appendChild(iframe); document.body.appendChild(form);
-  form.submit();
-  setCloudStatus('Upload sent, but this browser could not confirm the cloud received it (a browser security restriction, not necessarily a failed upload). Press "Load from cloud" in a moment to double-check it worked.', 'warn');
-  setTimeout(() => { form.remove(); iframe.remove(); }, 1800);
+  await doCloudSave(silent);
+}
+async function doCloudSave(silent=false) {
+  const token = getCloudToken();
+  if (!silent) setCloudStatus('Uploading current map to cloud…');
+  try {
+    const row = await supabaseRpc('fs25_save_map', {
+      p_map_id: CLOUD_MAP_ID,
+      p_code: token,
+      p_data: backupObject(),
+      p_updated_by: getCloudUserName()
+    });
+    if (row && row.saved_at) lastCloudSeen = { updatedAt: row.saved_at, updatedBy: getCloudUserName() };
+    setCloudStatus('Uploaded and confirmed by the cloud. Other players should press Load from cloud to see it.', 'ok');
+  } catch (err) {
+    setCloudStatus('Cloud upload failed: ' + err.message, 'bad');
+  }
 }
 function initCloudUI() {
-  const urlEl = document.getElementById('cloudUrl');
   const tokenEl = document.getElementById('cloudToken');
   const nameEl = document.getElementById('cloudUserName');
   const autoEl = document.getElementById('autoCloudToggle');
-  if (urlEl) urlEl.value = cloudUrl;
   if (tokenEl) tokenEl.value = cloudToken;
   if (nameEl) nameEl.value = cloudUserName;
   if (autoEl) autoEl.checked = autoCloud;
@@ -694,7 +664,7 @@ function initCloudUI() {
   document.getElementById('loadCloudBtn').onclick = cloudLoad;
   document.getElementById('saveCloudBtn').onclick = () => cloudSave(false);
   if (autoEl) autoEl.onchange = saveCloudSettings;
-  setCloudStatus(cloudUrl ? 'Cloud setup found on this device. Load from cloud before editing, then upload when done.' : 'Cloud is not set up yet. Local saving still works.', cloudUrl ? 'ok' : '');
+  setCloudStatus(cloudToken ? 'Cloud setup found on this device. Load from cloud before editing, then upload when done.' : 'Cloud is not set up yet. Enter the shared edit code above.', cloudToken ? 'ok' : '');
 }
 function savePlans() {
   localStorage.setItem('riverbendsprings_fs25_clean_plans_v1', JSON.stringify(plans));
